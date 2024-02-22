@@ -1,0 +1,13 @@
+name: BL-Phantom-Analysis-Fiji
+channels:
+  - defaults
+dependencies:
+  - Python >= 3.7
+  - imglyb >= 2.0.1
+  - jgo >= 1.0.3
+  - JPype >= 1.3.0
+  - labeling >= 0.1.12
+  - matplotlib (optional, for ij.py.show function only)
+  - NumPy
+  - scyjava >= 1.8.0
+  - xarray
