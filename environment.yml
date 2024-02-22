@@ -1,5 +1,6 @@
 name: BL-Phantom-Analysis-Fiji
 channels:
+  - conda-forge
   - defaults
 dependencies:
   - Python >= 3.7
