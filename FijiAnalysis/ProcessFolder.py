@@ -9,16 +9,19 @@ from ij.process import ImageConverter
 from ij.measure import Measurements
 from ij.plugin.frame import RoiManager
 from ij.process import ImageProcessor
+from ij.gui import GenericDialog
+from collections import defaultdict
+
 
 # Define parameters for the script, to be set by the user in ImageJ
-#@ File    (label = "Input directory", style = "directory") srcFile
-#@ File    (label = "Output directory", style = "directory") dstFile
-#@ File    (label = "Background image file") backgroundFile
-#@ String  (label = "File extension", value=".tif") ext
-#@ String  (label = "File name contains", value = "") containString
-#@ boolean (label = "Keep directory structure when saving", value = True) keepDirectories
-#@ String  (label = "Filter files by name (leave empty for no filter)", value = "") fileFilter
-#@ File    (label = "CSV output directory", style = "directory") csvOutputDir
+#@ File (label="Input directory", style="directory") srcFile
+#@ File (label="Output directory", style="directory") dstFile
+#@ File (label="Background image file") backgroundFile
+#@ String (label="File extension", value=".tif") ext
+#@ String (label="File name contains", value="") containString
+#@ boolean (label="Keep directory structure when saving", value=True) keepDirectories
+#@ String (label="Filter files by name (leave empty for no filter)", value="") fileFilter
+#@ File (label="CSV output directory", style="directory") csvOutputDir
 
 def run():
     srcDir = srcFile.getAbsolutePath()
@@ -29,7 +32,6 @@ def run():
         for fileName in fileNames:
             if fileFilter and fileFilter not in fileName:
                 continue  # Skip files that don't contain the specified filter text
-            print("Processing file:", fileName)
             if fileName.endswith(ext):
                 file_path = os.path.join(root, fileName)
                 print("Processing file:", file_path)
@@ -39,33 +41,53 @@ def run():
                 except Exception as e:
                     traceback.print_exc()
 
-    # Close the measurements window after processing all images
-    close_measurements_window()
+    if ask_user("Do you want to collate data from all CSV files?"):
+        compile_integrated_density(csvOutputDir.getAbsolutePath())
+
+def ask_user(question):
+    gd = GenericDialog("User Input")
+    gd.addMessage(question)
+    gd.enableYesNoCancel()
+    gd.showDialog()
+    return gd.wasOKed()
+
+def compile_integrated_density(csv_dir):
+    compiled_data_intden = defaultdict(list)
+    compiled_data_rawintden = defaultdict(list)
+    max_length = 0
+
+    for file_name in os.listdir(csv_dir):
+        if file_name.endswith('.csv'):
+            file_path = os.path.join(csv_dir, file_name)
+            with open(file_path, 'rb') as csvfile:  # 'rb' for Python 2.x compatibility
+                csvreader = csv.DictReader(csvfile)
+                for row in csvreader:
+                    if 'IntDen' in row:
+                        compiled_data_intden[file_name].append(row['IntDen'])
+                    if 'RawIntDen' in row:
+                        compiled_data_rawintden[file_name].append(row['RawIntDen'])
+                max_length = max(max_length, len(compiled_data_intden[file_name]), len(compiled_data_rawintden[file_name]))
+
+    # Pad shorter lists to make all lists of equal length
+    for key in compiled_data_intden:
+        compiled_data_intden[key].extend([''] * (max_length - len(compiled_data_intden[key])))
+    for key in compiled_data_rawintden:
+        compiled_data_rawintden[key].extend([''] * (max_length - len(compiled_data_rawintden[key])))
+
+    compiled_csv_path = os.path.join(csv_dir, 'compiled_density_data.csv')
+    with open(compiled_csv_path, 'wb') as csvfile:  # 'wb' for Python 2.x compatibility
+        csvwriter = csv.writer(csvfile)
+        headers = ['IntDen_' + k for k in compiled_data_intden.keys()] + ['RawIntDen_' + k for k in compiled_data_rawintden.keys()]
+        csvwriter.writerow(headers)  # Write headers
+        csvwriter.writerows(zip(*compiled_data_intden.values() + compiled_data_rawintden.values()))  # Write data
+
+    print("Compiled CSV saved to:", compiled_csv_path)
     
-# Function to close the measurements window
-def close_measurements_window():
-    if WindowManager.getWindow("Results") is not None:
-        WindowManager.getWindow("Results").close()
-        print("Results window closed.")
-
-def sum_slices(imp):
-    try:
-        zp = ZProjector(imp)
-        zp.setMethod(ZProjector.SUM_METHOD)
-        zp.doProjection()
-        return zp.getProjection()
-    except Exception as e:
-        error_message = "Error in sum_slices: {}".format(str(e))
-        print(error_message)
-        return None
-
-# Process function
 def process(srcDir, dstDir, currentDir, fileName, backgroundImagePath):
     try:
-        imagePath = os.path.join(currentDir, fileName)
+        imagePath = os.path.join(currentDir, fileName)  # Use 'currentDir' here
         print("File Name: " + fileName)
         print("Image path: " + imagePath)
-        print("Processing file: " + imagePath)
         imp = open_image(imagePath)
         if imp is None:
             print("Failed to open image: " + imagePath)
@@ -92,6 +114,26 @@ def process(srcDir, dstDir, currentDir, fileName, backgroundImagePath):
                 save_processed_image(result_imp, srcDir, dstDir, currentDir, fileName)
     except Exception as e:
         print("Error in process function for " + fileName + ": " + str(e))
+
+def sum_slices(imp):
+    try:
+        zp = ZProjector(imp)
+        zp.setMethod(ZProjector.SUM_METHOD)
+        zp.doProjection()
+        return zp.getProjection()
+    except Exception as e:
+        error_message = "Error in sum_slices: {}".format(str(e))
+        print(error_message)
+        return None
+        
+def save_with_roi(imp, processed_tiff_dir, file_name):
+    roi_save_path = os.path.join(processed_tiff_dir, "ROI_" + file_name.replace('.tif', '.png'))
+    print("Saving image with ROI to:", roi_save_path)
+    try:
+        IJ.saveAs(imp, "PNG", roi_save_path)
+        print("Image with ROI saved successfully.")
+    except Exception as e:
+        print("Error saving image with ROI:", e)
 
 # Function to open an image using ImageJ
 def open_image(imagePath):
@@ -198,3 +240,5 @@ def save_processed_image(imp, srcDir, dstDir, currentDir, fileName):
 
 # Run the script
 run()
+
+
