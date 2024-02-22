@@ -85,7 +85,7 @@ def compile_integrated_density(csv_dir):
     
 def process(srcDir, dstDir, currentDir, fileName, backgroundImagePath):
     try:
-        imagePath = os.path.join(currentDir, fileName)  # Use 'currentDir' here
+        imagePath = os.path.join(currentDir, fileName)
         print("File Name: " + fileName)
         print("Image path: " + imagePath)
         imp = open_image(imagePath)
@@ -107,14 +107,23 @@ def process(srcDir, dstDir, currentDir, fileName, backgroundImagePath):
                 roi = determine_roi(summed_imp)
 
                 if roi is not None:
+                    imp.setRoi(roi)
+                    save_with_roi(imp, dstDir, fileName)  # Save the image with ROI as PNG
                     measurements = apply_roi_and_measure(result_imp, roi)
-                    # Save CSV files to the specified directory
                     save_measurements_to_csv(measurements, csvOutputDir.getAbsolutePath(), fileName)
 
                 save_processed_image(result_imp, srcDir, dstDir, currentDir, fileName)
     except Exception as e:
         print("Error in process function for " + fileName + ": " + str(e))
 
+def save_with_roi(imp, processed_tiff_dir, file_name):
+    roi_save_path = os.path.join(processed_tiff_dir, "ROI_" + file_name.replace('.tif', '.png'))
+    print("Saving image with ROI to:", roi_save_path)
+    try:
+        IJ.saveAs(imp, "PNG", roi_save_path)
+        print("Image with ROI saved successfully.")
+    except Exception as e:
+        print("Error saving image with ROI:", e)
 def sum_slices(imp):
     try:
         zp = ZProjector(imp)
