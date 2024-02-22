@@ -9,5 +9,7 @@ dependencies:
   - labeling >= 0.1.12
   - matplotlib (optional, for ij.py.show function only)
   - NumPy
+  - pip
+    # - some-pip-package if you need any pip packages that are not available in Conda
   - scyjava >= 1.8.0
   - xarray
