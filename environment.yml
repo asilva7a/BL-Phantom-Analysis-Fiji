@@ -13,6 +13,5 @@ dependencies:
   - NumPy
   - openjdk = 11.0.0
   - pip
-    -pyimagej
   - scyjava >= 1.8.0
   - xarray
