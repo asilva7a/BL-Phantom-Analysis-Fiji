@@ -27,6 +27,10 @@ def run():
     srcDir = srcFile.getAbsolutePath()
     dstDir = dstFile.getAbsolutePath()
     backgroundImagePath = backgroundFile.getAbsolutePath()
+    mask_save_dir = os.path.join(dstDir, "Masks")
+
+    if not os.path.exists(mask_save_dir):
+        os.makedirs(mask_save_dir)
 
     for root, directories, fileNames in os.walk(srcDir):
         for fileName in fileNames:
@@ -36,10 +40,11 @@ def run():
                 file_path = os.path.join(root, fileName)
                 print("Processing file:", file_path)
                 try:
-                    process(srcDir, dstDir, root, fileName, backgroundImagePath)
-                    print("Finished processing file:", file_path)
+                    process(srcDir, dstDir, root, fileName, backgroundImagePath, mask_save_dir)
                 except Exception as e:
+                    print("Error processing file:", file_path)
                     traceback.print_exc()
+                    continue  # Continue with the next file
 
     if ask_user("Do you want to collate data from all CSV files?"):
         compile_integrated_density(csvOutputDir.getAbsolutePath())
@@ -59,7 +64,7 @@ def compile_integrated_density(csv_dir):
     for file_name in os.listdir(csv_dir):
         if file_name.endswith('.csv'):
             file_path = os.path.join(csv_dir, file_name)
-            with open(file_path, 'rb') as csvfile:  # 'rb' for Python 2.x compatibility
+            with open(file_path, 'rb') as csvfile:
                 csvreader = csv.DictReader(csvfile)
                 for row in csvreader:
                     if 'IntDen' in row:
@@ -68,62 +73,68 @@ def compile_integrated_density(csv_dir):
                         compiled_data_rawintden[file_name].append(row['RawIntDen'])
                 max_length = max(max_length, len(compiled_data_intden[file_name]), len(compiled_data_rawintden[file_name]))
 
-    # Pad shorter lists to make all lists of equal length
     for key in compiled_data_intden:
         compiled_data_intden[key].extend([''] * (max_length - len(compiled_data_intden[key])))
     for key in compiled_data_rawintden:
         compiled_data_rawintden[key].extend([''] * (max_length - len(compiled_data_rawintden[key])))
 
     compiled_csv_path = os.path.join(csv_dir, 'compiled_density_data.csv')
-    with open(compiled_csv_path, 'wb') as csvfile:  # 'wb' for Python 2.x compatibility
+    with open(compiled_csv_path, 'wb') as csvfile:
         csvwriter = csv.writer(csvfile)
         headers = ['IntDen_' + k for k in compiled_data_intden.keys()] + ['RawIntDen_' + k for k in compiled_data_rawintden.keys()]
-        csvwriter.writerow(headers)  # Write headers
-        csvwriter.writerows(zip(*compiled_data_intden.values() + compiled_data_rawintden.values()))  # Write data
-
+        csvwriter.writerow(headers)
+        csvwriter.writerows(zip(*compiled_data_intden.values() + compiled_data_rawintden.values()))
     print("Compiled CSV saved to:", compiled_csv_path)
-    
-def process(srcDir, dstDir, currentDir, fileName, backgroundImagePath):
+
+def process(srcDir, dstDir, currentDir, fileName, backgroundImagePath, mask_save_dir):
+    imp = None
+    result_imp = None  # Initialize result_imp to None
     try:
         imagePath = os.path.join(currentDir, fileName)
-        print("File Name: " + fileName)
-        print("Image path: " + imagePath)
+        print("Processing file:", imagePath)
         imp = open_image(imagePath)
         if imp is None:
-            print("Failed to open image: " + imagePath)
+            print("Failed to open image:", imagePath)
             return
 
         background_imp = open_image(backgroundImagePath)
         if background_imp is None:
-            print("Failed to open background image: " + backgroundImagePath)
+            print("Failed to open background image:", backgroundImagePath)
             return
 
         result_imp = subtract_background(imp, background_imp)
-        if result_imp is not None:
-            result_imp = remove_outliers(result_imp)
-            result_imp = apply_gaussian_blur(result_imp)
-            summed_imp = sum_slices(result_imp)
-            if summed_imp is not None:
-                roi = determine_roi(summed_imp)
+        if result_imp is None:
+            print("Failed to subtract background for:", imagePath)
+            return
 
-                if roi is not None:
-                    imp.setRoi(roi)
-                    save_with_roi(imp, dstDir, fileName)  # Save the image with ROI as PNG
-                    measurements = apply_roi_and_measure(result_imp, roi)
-                    save_measurements_to_csv(measurements, csvOutputDir.getAbsolutePath(), fileName)
-
-                save_processed_image(result_imp, srcDir, dstDir, currentDir, fileName)
+        result_imp = apply_gaussian_blur(result_imp)
+        summed_imp = sum_slices(result_imp)
+        if summed_imp is not None:
+            roi = determine_roi(summed_imp, mask_save_dir, fileName)
+            if roi is not None:
+                result_imp.setRoi(roi)
+                save_with_roi(result_imp, dstDir, fileName)
+                measurements = apply_roi_and_measure(result_imp, roi)
+                save_measurements_to_csv(measurements, csvOutputDir.getAbsolutePath(), fileName)
+            save_processed_image(result_imp, srcDir, dstDir, currentDir, fileName)
     except Exception as e:
-        print("Error in process function for " + fileName + ": " + str(e))
-
-def save_with_roi(imp, processed_tiff_dir, file_name):
+        print("Error in process function for", fileName, ":", e)
+        traceback.print_exc()
+    finally:
+        if imp is not None:
+            imp.close()  # Close the original image
+        if result_imp is not None:
+            result_imp.close()  # Close the result image if it was created
+        
+def save_with_roi(imp_with_roi, processed_tiff_dir, file_name):
     roi_save_path = os.path.join(processed_tiff_dir, "ROI_" + file_name.replace('.tif', '.png'))
     print("Saving image with ROI to:", roi_save_path)
     try:
-        IJ.saveAs(imp, "PNG", roi_save_path)
+        IJ.saveAs(imp_with_roi, "PNG", roi_save_path)
         print("Image with ROI saved successfully.")
     except Exception as e:
         print("Error saving image with ROI:", e)
+
 def sum_slices(imp):
     try:
         zp = ZProjector(imp)
@@ -174,7 +185,7 @@ def apply_gaussian_blur(imp, sigma=2.0):
     return imp
 
 # Function to determine the ROI based on the summed image
-def determine_roi(summed_imp):
+def determine_roi(summed_imp, mask_save_dir, file_name):
     ImageConverter(summed_imp).convertToGray8()
     ip = summed_imp.getProcessor()
     ip.setAutoThreshold("Triangle dark")
@@ -182,6 +193,8 @@ def determine_roi(summed_imp):
         print("Warning: Triangle thresholding failed, applying a manual threshold.")
         ip.setThreshold(50, 255, ImageProcessor.NO_LUT_UPDATE)
     IJ.run(summed_imp, "Convert to Mask", "")
+    save_mask(summed_imp, mask_save_dir, file_name)  # Save the mask as PNG
+
     rt = ResultsTable()
     pa = ParticleAnalyzer(ParticleAnalyzer.ADD_TO_MANAGER, Measurements.AREA, rt, 50.0, float('inf'), 0.0, 1.0)
     pa.analyze(summed_imp)
@@ -192,6 +205,16 @@ def determine_roi(summed_imp):
         return None
     largest_roi = max(rois, key=lambda r: r.getBounds().width * r.getBounds().height)
     return largest_roi
+
+def save_mask(mask_imp, mask_save_dir, file_name):
+    mask_save_path = os.path.join(mask_save_dir, "Mask_" + file_name.replace('.tif', '.png'))
+    print("Saving mask to:", mask_save_path)
+    try:
+        IJ.saveAs("PNG", mask_save_path)
+        print("Mask saved successfully.")
+    except Exception as e:
+        print("Error saving mask:", e)
+
 
 # Function to apply the determined ROI to each slice and measure it
 def apply_roi_and_measure(imp, roi):
@@ -249,5 +272,3 @@ def save_processed_image(imp, srcDir, dstDir, currentDir, fileName):
 
 # Run the script
 run()
-
-
