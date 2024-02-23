@@ -3,14 +3,16 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - Python >= 3.7
+  - Python = 3.9.13
   - imglyb >= 2.0.1
   - jgo >= 1.0.3
   - jpype1 >= 1.3.0
   - labeling >= 0.1.12
   - matplotlib (optional, for ij.py.show function only)
+  - Maven
   - NumPy
+  - openjdk = 11.0.0
   - pip
-    # - some-pip-package if you need any pip packages that are not available in Conda
+    -pyimagej
   - scyjava >= 1.8.0
   - xarray
