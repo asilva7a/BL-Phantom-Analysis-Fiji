@@ -12,7 +12,6 @@ from ij.process import ImageProcessor
 from ij.gui import GenericDialog
 from collections import defaultdict
 
-
 # Define parameters for the script, to be set by the user in ImageJ
 #@ File (label="Input directory", style="directory") srcFile
 #@ File (label="Output directory", style="directory") dstFile
@@ -28,7 +27,7 @@ def run():
     dstDir = dstFile.getAbsolutePath()
     backgroundImagePath = backgroundFile.getAbsolutePath()
     mask_save_dir = os.path.join(dstDir, "Masks")
-
+    
     if not os.path.exists(mask_save_dir):
         os.makedirs(mask_save_dir)
 
@@ -47,7 +46,7 @@ def run():
                     continue  # Continue with the next file
 
     if ask_user("Do you want to collate data from all CSV files?"):
-        compile_integrated_density(csvOutputDir.getAbsolutePath())
+    	compile_integrated_density(csvOutputDir.getAbsolutePath())
 
 def ask_user(question):
     gd = GenericDialog("User Input")
@@ -79,16 +78,19 @@ def compile_integrated_density(csv_dir):
         compiled_data_rawintden[key].extend([''] * (max_length - len(compiled_data_rawintden[key])))
 
     compiled_csv_path = os.path.join(csv_dir, 'compiled_density_data.csv')
-    with open(compiled_csv_path, 'wb') as csvfile:
+    
+    with open(compiled_csv_path, 'wb') as csvfile:  # Change to 'w' and add newline=''
         csvwriter = csv.writer(csvfile)
-        headers = ['IntDen_' + k for k in compiled_data_intden.keys()] + ['RawIntDen_' + k for k in compiled_data_rawintden.keys()]
+        headers = ['IntDen_' + k for k in compiled_data_intden] + ['RawIntDen_' + k for k in compiled_data_rawintden]
+        all_values = list(compiled_data_intden.values()) + list(compiled_data_rawintden.values())  # Use list concatenation
         csvwriter.writerow(headers)
-        csvwriter.writerows(zip(*compiled_data_intden.values() + compiled_data_rawintden.values()))
+        csvwriter.writerows(zip(*all_values))
+        
     print("Compiled CSV saved to:", compiled_csv_path)
 
 def process(srcDir, dstDir, currentDir, fileName, backgroundImagePath, mask_save_dir):
     imp = None
-    result_imp = None  # Initialize result_imp to None
+    result_imp = None
     try:
         imagePath = os.path.join(currentDir, fileName)
         print("Processing file:", imagePath)
@@ -122,18 +124,22 @@ def process(srcDir, dstDir, currentDir, fileName, backgroundImagePath, mask_save
         traceback.print_exc()
     finally:
         if imp is not None:
-            imp.close()  # Close the original image
+            imp.close()
         if result_imp is not None:
-            result_imp.close()  # Close the result image if it was created
+            result_imp.close()
         
 def save_with_roi(imp_with_roi, processed_tiff_dir, file_name):
     roi_save_path = os.path.join(processed_tiff_dir, "ROI_" + file_name.replace('.tif', '.png'))
-    print("Saving image with ROI to:", roi_save_path)
+    print("Attempting to save image with ROI to:", roi_save_path)
     try:
-        IJ.saveAs(imp_with_roi, "PNG", roi_save_path)
-        print("Image with ROI saved successfully.")
+        if imp_with_roi is not None:
+            IJ.saveAs(imp_with_roi, "PNG", roi_save_path)
+            print("Image with ROI saved successfully.")
+        else:
+            print("Warning: Image object is None, cannot save.")
     except Exception as e:
         print("Error saving image with ROI:", e)
+        traceback.print_exc()
 
 def sum_slices(imp):
     try:
@@ -210,11 +216,20 @@ def save_mask(mask_imp, mask_save_dir, file_name):
     mask_save_path = os.path.join(mask_save_dir, "Mask_" + file_name.replace('.tif', '.png'))
     print("Saving mask to:", mask_save_path)
     try:
-        IJ.saveAs("PNG", mask_save_path)
+        IJ.saveAs(mask_imp, "PNG", mask_save_path)  # Specify mask_imp
         print("Mask saved successfully.")
     except Exception as e:
         print("Error saving mask:", e)
 
+def save_measurements_to_csv(measurements, output_dir, file_name):
+    output_path = os.path.join(output_dir, file_name + "_measurements.csv")
+    with open(output_path, 'w', newline='') as file:  # Change to 'w' and add newline=''
+        writer = csv.writer(file)
+        if measurements:
+            headers = ["Area", "Min", "Max", "IntDen", "Mean", "RawIntDen", "Stack Position"]
+            writer.writerow(headers)
+            for measurement in measurements:
+                writer.writerow(measurement)
 
 # Function to apply the determined ROI to each slice and measure it
 def apply_roi_and_measure(imp, roi):
@@ -270,5 +285,12 @@ def save_processed_image(imp, srcDir, dstDir, currentDir, fileName):
         print("Error saving image: " + str(e))
     imp.close()
 
-# Run the script
-run()
+if __name__ == "__main__":
+    print("Script starting")
+    try:
+        run()
+    except Exception as e:
+        print("Unhandled exception in main:", e)
+        traceback.print_exc()
+    print("Script ended")
+
